@@ -1,143 +1,211 @@
-# Table Comparison Framework
+# Table Comparison using Selenium + Java
 
-Compares two HTML tables on the same page using **Customer ID** as the unique
-reference key. The comparison ignores **row order** and **column order** and
-matches columns by **header name** (with an optional name mapping such as
-`Total Amount` -> `Amount`).
+This project came from a question I was asked in one of my client interviews.
 
-Built to stay readable years from now: plain Java, one job per class,
-step-by-step comments, no frameworks or patterns you need to look up.
+In that interview, I was able to answer most of the questions, but I got stuck on this table comparison problem. I could not complete the solution the way I wanted during the interview, and I was rejected.
 
-## Tech stack
+After that, I decided to build the solution myself so I could understand the problem properly and be ready if I get a similar question again.
 
-| Tool                          | Version |
-|-------------------------------|---------|
-| Java                          | 21      |
-| Selenium WebDriver            | 4.26.0  |
-| TestNG                        | 7.10.2  |
-| Log4j2 (api / core / slf4j2)  | 2.24.3  |
-| Maven Surefire Plugin         | 3.2.5   |
+What was the problem?
 
-## Project structure
+There are two HTML tables containing customer data.
 
-```
-table-comparison/
-├── pom.xml
-├── testng.xml
-├── README.md
-└── src
-    ├── main/java/com/example/tablecompare
-    │   ├── model
-    │   │   ├── TableData.java              # snapshot of one table (headers, rows, key index)
-    │   │   └── TableComparisonResult.java  # failures (fail test) + reports (log only)
-    │   └── utils
-    │       ├── TableReader.java            # Selenium reader: locator in -> TableData out
-    │       └── TableComparator.java        # the comparison algorithm
-    └── test/java/com/example/tablecompare
-        ├── BaseTest.java                   # Chrome + loading the local HTML page
-        └── TableComparisonTest.java        # locators, key column, mapping, SoftAssert
-```
+The requirement is to compare the data between the two tables using Customer ID as the reference.
 
-The page under test is `src/test/resources/testdata/customer-tables.html`
-(two `<table>` elements). It is loaded from the **classpath**, never from a
-hard-coded Windows path.
+The tricky part is that:
 
-## How to run
+rows may not be in the same order
 
-```bash
-cd table-comparison
+columns may not be in the same order
+
+column names may be different
+
+one table may contain extra columns
+
+the same customer can appear at a different row position in the second table
+
+So the comparison should not depend on row number or column index.
+
+Example
+
+Table 1 can have:
+
+Customer ID
+
+Name
+
+Total Orders
+
+Total Amount
+
+Table 2 can have:
+
+Amount
+
+Customer ID
+
+Orders
+
+Customer Name
+
+Region
+
+Here:
+
+Name in Table 1 is the same as Customer Name in Table 2
+
+Total Orders is the same as Orders
+
+Total Amount is the same as Amount
+
+Region is an extra column and is ignored
+
+The row order can also be completely different.
+
+How the comparison works
+
+The logic is simple:
+
+Read both tables using Selenium.
+
+Use Customer ID as the unique key.
+
+Take one Customer ID from Table 1.
+
+Find the same Customer ID in Table 2.
+
+Compare the values using column names instead of column positions.
+
+Use aliases when the same column has a different name in Table 2.
+
+Ignore extra columns that are not part of the comparison.
+
+Fail the test if a Customer ID is missing or if the compared values do not match.
+
+For example, if Table 1 has:
+
+Customer ID: C003
+Name: Carol Kim
+Total Orders: 12
+Total Amount: 2000.00
+
+the code searches for C003 in Table 2 and then compares the corresponding values.
+
+It does not matter if C003 is the first row in Table 1 and the last row in Table 2.
+
+Column aliases
+
+If column names are different between the tables, the test can define the mapping.
+
+Example:
+
+Map<String, String> columnAliases = Map.of(
+        "Name", "Customer Name",
+        "Total Orders", "Orders",
+        "Total Amount", "Amount"
+);
+
+This keeps the comparison logic reusable.
+
+Project structure
+
+The project is kept intentionally simple.
+
+src/main/java
+└── com.example.tablecompare
+    ├── model
+    │   └── TableData.java
+    └── utils
+        ├── TableReader.java
+        └── TableComparator.java
+
+src/test/java
+└── com.example.tablecompare
+    ├── BaseTest.java
+    └── TableComparisonTest.java
+
+src/test/resources
+└── testdata
+    └── customer-tables.html
+
+BaseTest
+
+Handles browser setup and cleanup using TestNG @BeforeMethod and @AfterMethod.
+
+TableComparisonTest
+
+Contains the actual @Test.
+
+It reads both tables, defines any column aliases, and calls the comparison method.
+
+TableReader
+
+Reads the table headers and rows using Selenium.
+
+It stores each row using the Customer ID as the key.
+
+TableData
+
+Simple class used to store the table data.
+
+TableComparator
+
+Contains the main comparison logic.
+
+It matches rows by Customer ID and compares the values by column name.
+
+Technologies used
+
+Java
+
+Selenium WebDriver
+
+TestNG
+
+Maven
+
+Log4j2
+
+What should fail the test?
+
+The test should fail when:
+
+a Customer ID from Table 1 is missing in Table 2
+
+a value does not match for the same customer
+
+For example:
+
+Customer ID C105
+Total Orders: 9
+Orders: 10
+
+This is a real data mismatch, so the test should fail.
+
+What should not fail the test?
+
+An extra column should not fail the test.
+
+For example, if Table 2 has:
+
+Region
+
+and Table 1 does not have it, the column is simply ignored or logged as informational.
+
+The same applies when the column order is different.
+
+Running the test
+
+From the project root:
 
 mvn clean test
-# or explicitly:
-mvn clean test -DsuiteXmlFile=testng.xml
-```
 
-Chrome must be installed; Selenium Manager fetches the matching chromedriver
-automatically. In IntelliJ/Eclipse, import as *Existing Maven Project* and run
-`testng.xml` directly if you prefer.
+You can also run TableComparisonTest directly from IntelliJ or Eclipse as a TestNG test.
 
-## How the comparison works (the algorithm)
+Why I kept this project
 
-```
-1. READ      TableReader locates each <table> via the locator given by the test,
-             reads "thead th" headers, and builds header name -> column index.
-2. KEY       Each "tbody tr" row is stored twice:
-             - as a plain list of cell values, and
-             - indexed by Customer ID: Map<Customer ID, Map<header, value>>
-3. MATCH     For every Customer ID in Table 1, look it up in Table 2.
-             Not found -> failure (test fails).
-4. COMPARE   For each mapped column (e.g. "Total Amount" -> "Amount"),
-             compare Table 1 value vs Table 2 value by header name.
-             Different -> failure (test fails).
-5. REPORT    Extra columns on either side and Customer IDs only in Table 2
-             are logged as reports - they do NOT fail the test.
-6. ASSERT    All failures are pushed into a TestNG SoftAssert and reported
-             together by softAssert.assertAll().
-```
+I mainly created this project to close a gap from that interview.
 
-Rules enforced by the code:
+Instead of just remembering the answer, I wanted to build it and understand why the approach works.
 
-- rows are matched by **Customer ID**, never by row number
-- columns are matched by **header name**, never by index
-- duplicate Customer IDs abort the run with a clear error (never overwritten)
-- every problem is collected; the run never stops at the first mismatch
-
-## What fails vs what is only logged
-
-| Finding                                        | Result        |
-|------------------------------------------------|---------------|
-| Value mismatch (e.g. `1200.50` vs `1100.50`)   | **Fails test** |
-| Customer ID missing in Table 2                 | **Fails test** |
-| Customer ID only in Table 2                    | logged (report) |
-| Extra/missing column on either side            | logged (report) |
-| Mapped column missing in Table 2               | logged (report) |
-| Duplicate Customer ID in either table          | run aborts with clear error |
-
-## Expected result for the sample page
-
-The sample page contains two known differences, so the test fails while
-listing exactly them:
-
-```
-FAIL - Customer ID C004 | Column: Total Orders -> Total Orders | Expected: 5 | Actual: 4
-FAIL - Customer ID C002 | Column: Total Amount -> Amount | Expected: 1200.50 | Actual: 1100.50
-```
-
-`C001` and `C003` match. The extra `surcharge` column is reported but does not
-fail the test:
-
-```
-Column 'surcharge' exists in Table 2 but was not found in Table 1.
-```
-
-## Sample console output
-
-```
-[INFO ] TableReader - Reading Table 1
-[INFO ] TableReader - Headers found: [Customer ID, Name, Total Orders, Total Amount]
-[INFO ] TableReader - Reading Table 2
-[INFO ] TableReader - Headers found: [Customer ID, Name, Total Orders, Amount, surcharge]
-[INFO ] TableComparator - Comparing Table 1 vs Table 2 using key column 'Customer ID'
-[WARN ] TableComparator - Column 'surcharge' exists in Table 2 but was not found in Table 1.
-[INFO ] TableComparator - Comparing Customer ID C003
-[INFO ] TableComparator - MATCHED: Customer ID C003 matches across all configured columns.
-[ERROR] TableComparator - MISMATCH: Customer ID=C004, column=Total Orders -> Total Orders, expected=5, actual=4
-[INFO ] TableComparator - Comparison finished: 2 matched key(s), 2 failure(s), 1 note(s)
-```
-
-## Reusing it for other tables
-
-Only the test class knows anything about specific tables. To compare different
-tables later, write a new test that supplies:
-
-```java
-// any locators, any key column, any column names
-TableData t1 = readTable(By.id("ordersTable"), "Table 1", "Order No");
-TableData t2 = readTable(By.id("backupTable"), "Table 2", "Order No");
-
-TableComparisonResult result = TableComparator.compareTables(
-        t1, t2, "Order No",
-        Map.of("Order Total", "Total", "Status", "State"));
-```
-
-No utility class needs to change.
+The main thing I learned from this problem is that table comparison becomes much easier when rows are matched by a unique key and columns are matched by header name instead of relying on their position.
